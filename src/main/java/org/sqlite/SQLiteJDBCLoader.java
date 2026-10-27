@@ -35,6 +35,10 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.attribute.PosixFileAttributes;
+import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.PosixFilePermissions;
+import java.nio.file.attribute.UserPrincipal;
 import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -42,6 +46,7 @@ import java.text.MessageFormat;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Properties;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Stream;
 import org.sqlite.util.AndroidSignatureIgnore;
@@ -112,8 +117,19 @@ public class SQLiteJDBCLoader {
         if (System.getProperty("org.sqlite.tmpdir") != null) {
             return;
         }
+        boolean posix = directory.getFileSystem().supportedFileAttributeViews().contains("posix");
+        boolean created = false;
         try {
-            Files.createDirectory(directory);
+            if (posix) {
+                // Other accounts must not be able to replace a library between extract and load.
+                Files.createDirectory(
+                        directory,
+                        PosixFilePermissions.asFileAttribute(
+                                PosixFilePermissions.fromString("rwx------")));
+            } else {
+                Files.createDirectory(directory);
+            }
+            created = true;
         } catch (FileAlreadyExistsException existing) {
             // Other JVMs reuse this directory; validate the existing entry without following links.
         }
@@ -123,6 +139,43 @@ public class SQLiteJDBCLoader {
                     "Cannot use default native library directory '"
                             + directory
                             + "': expected a directory without symbolic links.");
+        }
+        if (!posix) {
+            return;
+        }
+        PosixFileAttributes attributes =
+                Files.readAttributes(
+                        directory, PosixFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+        Set<PosixFilePermission> permissions = attributes.permissions();
+        boolean ownedByCurrentUser =
+                created || attributes.owner().equals(currentFileOwner(directory));
+        if (!ownedByCurrentUser
+                || permissions.contains(PosixFilePermission.GROUP_WRITE)
+                || permissions.contains(PosixFilePermission.OTHERS_WRITE)) {
+            throw new IOException(
+                    "Cannot use default native library directory '"
+                            + directory
+                            + "': expected a directory owned by the current user that is not"
+                            + " writable by group or others, but found owner '"
+                            + attributes.owner().getName()
+                            + "' and permissions "
+                            + PosixFilePermissions.toString(permissions)
+                            + ".");
+        }
+    }
+
+    /**
+     * Returns the owner assigned to new files created by this process, which is the account that
+     * must own the default native library directory.
+     */
+    private static UserPrincipal currentFileOwner(Path directory) throws IOException {
+        Path probe =
+                Files.createTempFile(
+                        directory.toAbsolutePath().getParent(), ".sqlite-jdbc-owner-", ".tmp");
+        try {
+            return Files.getOwner(probe, LinkOption.NOFOLLOW_LINKS);
+        } finally {
+            Files.deleteIfExists(probe);
         }
     }
 
