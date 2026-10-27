@@ -27,10 +27,14 @@ package org.sqlite;
 import java.io.*;
 import java.net.URL;
 import java.net.URLConnection;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -80,8 +84,46 @@ public class SQLiteJDBCLoader {
     }
 
     private static File getTempDir() {
-        return new File(
-                System.getProperty("org.sqlite.tmpdir", System.getProperty("java.io.tmpdir")));
+        String configuredDirectory = System.getProperty("org.sqlite.tmpdir");
+        if (configuredDirectory != null) {
+            return new File(configuredDirectory);
+        }
+        // Keep cleanup independent of the number of unrelated files in the temporary root.
+        // Separate users need separate writable directories under a shared temporary root.
+        try {
+            byte[] user =
+                    MessageDigest.getInstance("SHA-256")
+                            .digest(
+                                    System.getProperty("user.name", "")
+                                            .getBytes(StandardCharsets.UTF_8));
+            StringBuilder directoryName = new StringBuilder("sqlite-jdbc-");
+            for (byte value : user) {
+                directoryName.append(Character.forDigit((value & 0xff) >>> 4, 16));
+                directoryName.append(Character.forDigit(value & 0xf, 16));
+            }
+            return new File(
+                    new File(System.getProperty("java.io.tmpdir")), directoryName.toString());
+        } catch (NoSuchAlgorithmException failure) {
+            throw new IllegalStateException("SHA-256 algorithm is not available", failure);
+        }
+    }
+
+    private static void prepareDefaultTempDir(Path directory) throws IOException {
+        if (System.getProperty("org.sqlite.tmpdir") != null) {
+            return;
+        }
+        try {
+            Files.createDirectory(directory);
+        } catch (FileAlreadyExistsException existing) {
+            // Other JVMs reuse this directory; validate the existing entry without following links.
+        }
+        if (!Files.readAttributes(directory, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS)
+                .isDirectory()) {
+            throw new IOException(
+                    "Cannot use default native library directory '"
+                            + directory
+                            + "': expected a directory without symbolic links.");
+        }
     }
 
     /**
@@ -90,24 +132,29 @@ public class SQLiteJDBCLoader {
     static void cleanup() {
         String searchPattern = "sqlite-" + getVersion();
 
-        try (Stream<Path> dirList = Files.list(getTempDir().toPath())) {
-            dirList.filter(
-                            path ->
-                                    !path.getFileName().toString().endsWith(LOCK_EXT)
-                                            && path.getFileName()
-                                                    .toString()
-                                                    .startsWith(searchPattern))
-                    .forEach(
-                            nativeLib -> {
-                                Path lckFile = Paths.get(nativeLib + LOCK_EXT);
-                                if (Files.notExists(lckFile)) {
-                                    try {
-                                        Files.delete(nativeLib);
-                                    } catch (Exception e) {
-                                        logger.error(() -> "Failed to delete old native lib", e);
+        try {
+            Path directory = getTempDir().toPath();
+            prepareDefaultTempDir(directory);
+            try (Stream<Path> dirList = Files.list(directory)) {
+                dirList.filter(
+                                path ->
+                                        !path.getFileName().toString().endsWith(LOCK_EXT)
+                                                && path.getFileName()
+                                                        .toString()
+                                                        .startsWith(searchPattern))
+                        .forEach(
+                                nativeLib -> {
+                                    Path lckFile = Paths.get(nativeLib + LOCK_EXT);
+                                    if (Files.notExists(lckFile)) {
+                                        try {
+                                            Files.delete(nativeLib);
+                                        } catch (Exception e) {
+                                            logger.error(
+                                                    () -> "Failed to delete old native lib", e);
+                                        }
                                     }
-                                }
-                            });
+                                });
+            }
         } catch (IOException e) {
             logger.error(() -> "Failed to open directory", e);
         }
@@ -193,6 +240,7 @@ public class SQLiteJDBCLoader {
         Path extractedLckFile = Paths.get(targetFolder, extractedLckFileName);
 
         try {
+            prepareDefaultTempDir(Paths.get(targetFolder));
             // Extract a native library file into the target directory
             try (InputStream reader = getResourceAsStream(nativeLibraryFilePath)) {
                 if (Files.notExists(extractedLckFile)) {

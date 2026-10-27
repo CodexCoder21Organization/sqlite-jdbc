@@ -85,7 +85,7 @@ try (Connection conn = DriverManager.getConnection("jdbc:sqlite::resource:jar:ht
 DB files will be extracted to a temporary folder specified in `System.getProperty("java.io.tmpdir")`.
 
 ## Configure directory to extract native library
-sqlite-jdbc extracts a native library for your OS to the directory specified by `java.io.tmpdir` JVM property. To use another directory, set `org.sqlite.tmpdir` JVM property to your favorite path.
+sqlite-jdbc extracts a native library for your OS to a directory for the current user under the directory specified by the `java.io.tmpdir` JVM property. Startup cleans old native libraries in that directory without listing unrelated files in the temporary root. To use another directory directly, set the `org.sqlite.tmpdir` JVM property to your preferred path.
 
 ## How to use a specific native library
 You can use a specific version of the native library by setting the following JVM properties:
