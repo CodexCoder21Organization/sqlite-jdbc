@@ -23,9 +23,17 @@ import java.nio.file.WatchService;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.FileAttribute;
 import java.nio.file.attribute.FileAttributeView;
+import java.nio.file.attribute.FileOwnerAttributeView;
+import java.nio.file.attribute.FileTime;
+import java.nio.file.attribute.GroupPrincipal;
+import java.nio.file.attribute.PosixFileAttributeView;
+import java.nio.file.attribute.PosixFileAttributes;
+import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.UserPrincipal;
 import java.nio.file.attribute.UserPrincipalLookupService;
 import java.nio.file.spi.FileSystemProvider;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -34,8 +42,29 @@ import java.util.concurrent.ExecutorService;
 
 /**
  * Default-provider decorator that denies only enumeration of the configured unrelated temp root.
+ *
+ * <p>When {@code org.sqlite.test.foreignOwnerDirectory} names a path, owner queries for exactly
+ * that path report {@link #FOREIGN_OWNER_NAME} instead of the real owner, so a child JVM sees a
+ * directory owned by another account without the test needing a second account. All other
+ * attributes, including permissions, are reported unchanged.
  */
 public final class GuardedFileSystemProvider extends FileSystemProvider {
+    /** Name of the account reported as owner of the configured foreign-owner directory. */
+    public static final String FOREIGN_OWNER_NAME = "sqlite-test-foreign-owner";
+
+    private static final UserPrincipal FOREIGN_OWNER =
+            new UserPrincipal() {
+                @Override
+                public String getName() {
+                    return FOREIGN_OWNER_NAME;
+                }
+
+                @Override
+                public String toString() {
+                    return FOREIGN_OWNER_NAME;
+                }
+            };
+
     private final FileSystemProvider delegate;
     private final GuardFileSystem fileSystem;
 
@@ -62,6 +91,14 @@ public final class GuardedFileSystemProvider extends FileSystemProvider {
         String configured = System.getProperty("org.sqlite.test.forbiddenDirectory");
         if (configured == null) return null;
         return fileSystem.delegate.getPath(configured).toAbsolutePath().normalize().toString();
+    }
+
+    private boolean reportsForeignOwner(Path path) {
+        String configured = System.getProperty("org.sqlite.test.foreignOwnerDirectory");
+        if (configured == null) return false;
+        String expected =
+                fileSystem.delegate.getPath(configured).toAbsolutePath().normalize().toString();
+        return expected.equals(unwrap(path).toAbsolutePath().normalize().toString());
     }
 
     @Override
@@ -225,19 +262,173 @@ public final class GuardedFileSystemProvider extends FileSystemProvider {
     @Override
     public <V extends FileAttributeView> V getFileAttributeView(
             Path path, Class<V> type, LinkOption... options) {
-        return delegate.getFileAttributeView(unwrap(path), type, options);
+        V view = delegate.getFileAttributeView(unwrap(path), type, options);
+        if (view == null || !reportsForeignOwner(path)) return view;
+        if (view instanceof PosixFileAttributeView) {
+            return type.cast(new ForeignOwnerPosixView((PosixFileAttributeView) view));
+        }
+        if (view instanceof FileOwnerAttributeView) {
+            return type.cast(new ForeignOwnerView((FileOwnerAttributeView) view));
+        }
+        return view;
     }
 
     @Override
     public <A extends BasicFileAttributes> A readAttributes(
             Path path, Class<A> type, LinkOption... options) throws IOException {
-        return delegate.readAttributes(unwrap(path), type, options);
+        A attributes = delegate.readAttributes(unwrap(path), type, options);
+        if (attributes instanceof PosixFileAttributes && reportsForeignOwner(path)) {
+            return type.cast(new ForeignOwnerAttributes((PosixFileAttributes) attributes));
+        }
+        return attributes;
     }
 
     @Override
     public Map<String, Object> readAttributes(Path path, String attributes, LinkOption... options)
             throws IOException {
-        return delegate.readAttributes(unwrap(path), attributes, options);
+        Map<String, Object> values = delegate.readAttributes(unwrap(path), attributes, options);
+        if (values.containsKey("owner") && reportsForeignOwner(path)) {
+            Map<String, Object> replaced = new HashMap<>(values);
+            replaced.put("owner", FOREIGN_OWNER);
+            return replaced;
+        }
+        return values;
+    }
+
+    private static final class ForeignOwnerAttributes implements PosixFileAttributes {
+        private final PosixFileAttributes delegate;
+
+        private ForeignOwnerAttributes(PosixFileAttributes delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public UserPrincipal owner() {
+            return FOREIGN_OWNER;
+        }
+
+        @Override
+        public GroupPrincipal group() {
+            return delegate.group();
+        }
+
+        @Override
+        public Set<PosixFilePermission> permissions() {
+            return delegate.permissions();
+        }
+
+        @Override
+        public FileTime lastModifiedTime() {
+            return delegate.lastModifiedTime();
+        }
+
+        @Override
+        public FileTime lastAccessTime() {
+            return delegate.lastAccessTime();
+        }
+
+        @Override
+        public FileTime creationTime() {
+            return delegate.creationTime();
+        }
+
+        @Override
+        public boolean isRegularFile() {
+            return delegate.isRegularFile();
+        }
+
+        @Override
+        public boolean isDirectory() {
+            return delegate.isDirectory();
+        }
+
+        @Override
+        public boolean isSymbolicLink() {
+            return delegate.isSymbolicLink();
+        }
+
+        @Override
+        public boolean isOther() {
+            return delegate.isOther();
+        }
+
+        @Override
+        public long size() {
+            return delegate.size();
+        }
+
+        @Override
+        public Object fileKey() {
+            return delegate.fileKey();
+        }
+    }
+
+    private static final class ForeignOwnerView implements FileOwnerAttributeView {
+        private final FileOwnerAttributeView delegate;
+
+        private ForeignOwnerView(FileOwnerAttributeView delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public String name() {
+            return delegate.name();
+        }
+
+        @Override
+        public UserPrincipal getOwner() {
+            return FOREIGN_OWNER;
+        }
+
+        @Override
+        public void setOwner(UserPrincipal owner) throws IOException {
+            delegate.setOwner(owner);
+        }
+    }
+
+    private static final class ForeignOwnerPosixView implements PosixFileAttributeView {
+        private final PosixFileAttributeView delegate;
+
+        private ForeignOwnerPosixView(PosixFileAttributeView delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public String name() {
+            return delegate.name();
+        }
+
+        @Override
+        public PosixFileAttributes readAttributes() throws IOException {
+            return new ForeignOwnerAttributes(delegate.readAttributes());
+        }
+
+        @Override
+        public void setTimes(
+                FileTime lastModifiedTime, FileTime lastAccessTime, FileTime createTime)
+                throws IOException {
+            delegate.setTimes(lastModifiedTime, lastAccessTime, createTime);
+        }
+
+        @Override
+        public UserPrincipal getOwner() {
+            return FOREIGN_OWNER;
+        }
+
+        @Override
+        public void setOwner(UserPrincipal owner) throws IOException {
+            delegate.setOwner(owner);
+        }
+
+        @Override
+        public void setPermissions(Set<PosixFilePermission> permissions) throws IOException {
+            delegate.setPermissions(permissions);
+        }
+
+        @Override
+        public void setGroup(GroupPrincipal group) throws IOException {
+            delegate.setGroup(group);
+        }
     }
 
     @Override

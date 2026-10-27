@@ -339,6 +339,96 @@ public class SQLiteJDBCLoaderTempDirectoryTest {
     }
 
     @Test
+    public void defaultDirectoryOwnedByAnotherAccountIsRefused(@TempDir Path tempRoot)
+            throws Exception {
+        ChildResult firstStart = runChild("jdbc", tempRoot, null);
+        assertThat(firstStart.exitCode)
+                .as("The first default-directory startup must succeed.\n%s", firstStart.output)
+                .isZero();
+        assertThat(firstStart.output).contains("JDBC_STARTUP_OK");
+
+        List<Path> directories = childDirectories(tempRoot);
+        assertThat(directories)
+                .as("The first startup should create one default directory below java.io.tmpdir")
+                .hasSize(1);
+        Path defaultDirectory = directories.get(0);
+        clearDirectory(defaultDirectory);
+        byte[] sentinelBytes = new byte[] {79, 87, 78, 69, 82};
+        Path staleNativeFile =
+                defaultDirectory.resolve(
+                        "sqlite-" + SQLiteJDBCLoader.getVersion() + "-foreign-owner-stale.so");
+        Files.write(staleNativeFile, sentinelBytes);
+        Files.setPosixFilePermissions(
+                defaultDirectory, PosixFilePermissions.fromString("rwx------"));
+        List<Path> entriesBefore = directoryEntries(defaultDirectory);
+
+        ChildResult secondStart =
+                runChild(
+                        "jdbc",
+                        tempRoot,
+                        null,
+                        null,
+                        "-Dorg.sqlite.test.foreignOwnerDirectory=" + defaultDirectory);
+
+        String refusal =
+                "Cannot use default native library directory '"
+                        + defaultDirectory
+                        + "': expected a directory owned by the current user that is not writable"
+                        + " by group or others, but found owner '"
+                        + GuardedFileSystemProvider.FOREIGN_OWNER_NAME
+                        + "' and permissions rwx------.";
+        assertThat(secondStart.output)
+                .as("The child must report why the other account's directory was refused.")
+                .contains(refusal);
+        assertExpectedDefaultPathOutcome(secondStart, refusal);
+        assertThat(directoryEntries(defaultDirectory))
+                .as(
+                        "SQLite startup must neither clean up nor extract into another account's directory. Child output:\n%s",
+                        secondStart.output)
+                .containsExactlyElementsOf(entriesBefore);
+        assertThat(Files.readAllBytes(staleNativeFile)).containsExactly(sentinelBytes);
+        assertThat(
+                        PosixFilePermissions.toString(
+                                Files.getPosixFilePermissions(
+                                        defaultDirectory, LinkOption.NOFOLLOW_LINKS)))
+                .as("SQLite startup must not change the permissions of a refused directory")
+                .isEqualTo("rwx------");
+    }
+
+    @Test
+    public void reusingDefaultDirectoryLeavesNoOwnerCheckFilesInTemporaryRoot(
+            @TempDir Path tempRoot) throws Exception {
+        ChildResult firstStart = runChild("jdbc", tempRoot, null);
+        assertThat(firstStart.exitCode)
+                .as("The first default-directory startup must succeed.\n%s", firstStart.output)
+                .isZero();
+        List<Path> directories = childDirectories(tempRoot);
+        assertThat(directories).hasSize(1);
+        Path defaultDirectory = directories.get(0);
+        List<Path> rootEntriesBefore = directoryEntries(tempRoot);
+
+        ChildResult secondStart = runChild("jdbc", tempRoot, null);
+        assertThat(secondStart.exitCode)
+                .as(
+                        "A fresh JVM should reuse the owner-only default directory.\n%s",
+                        secondStart.output)
+                .isZero();
+        assertThat(secondStart.output).contains("JDBC_STARTUP_OK");
+
+        List<Path> addedRootEntries = directoryEntries(tempRoot);
+        addedRootEntries.removeAll(rootEntriesBefore);
+        assertThat(addedRootEntries)
+                .as(
+                        "Reusing %s must leave only the child log in java.io.tmpdir. Child output:\n%s",
+                        defaultDirectory, secondStart.output)
+                .hasSize(1)
+                .allSatisfy(
+                        entry ->
+                                assertThat(entry.getFileName().toString())
+                                        .startsWith("sqlite-startup-child-"));
+    }
+
+    @Test
     public void explicitDirectoryKeepsCleanupRulesAndRepeatedInitialization(@TempDir Path tempRoot)
             throws Exception {
         Path explicitDirectory = Files.createDirectory(tempRoot.resolve("sqlite-native"));
@@ -372,7 +462,11 @@ public class SQLiteJDBCLoaderTempDirectoryTest {
     }
 
     private static ChildResult runChild(
-            String mode, Path tempRoot, Path explicitDirectory, String userName)
+            String mode,
+            Path tempRoot,
+            Path explicitDirectory,
+            String userName,
+            String... extraJvmOptions)
             throws IOException, InterruptedException {
         Path outputFile = Files.createTempFile(tempRoot, "sqlite-startup-child-", ".log");
         List<String> command = new ArrayList<>();
@@ -393,6 +487,9 @@ public class SQLiteJDBCLoaderTempDirectoryTest {
         }
         if (userName != null) {
             command.add("-Duser.name=" + userName);
+        }
+        for (String option : extraJvmOptions) {
+            command.add(option);
         }
         String classPath = System.getProperty("surefire.test.class.path");
         if (classPath == null || classPath.trim().isEmpty()) {
