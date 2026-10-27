@@ -17,7 +17,8 @@ public final class SQLiteJDBCLoaderTempDirectoryProbe {
         }
 
         if ("guard-control".equals(args[0])) {
-            Files.newDirectoryStream(new File(System.getProperty("java.io.tmpdir")).toPath()).close();
+            Files.newDirectoryStream(new File(System.getProperty("java.io.tmpdir")).toPath())
+                    .close();
             throw new AssertionError("The provider guard did not reject the temporary root");
         }
         if (!"jdbc".equals(args[0])) {
