@@ -8,9 +8,13 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.PosixFilePermissions;
+import java.nio.file.attribute.UserPrincipal;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -246,6 +250,92 @@ public class SQLiteJDBCLoaderTempDirectoryTest {
                 Files.delete(defaultPath);
             }
         }
+    }
+
+    @Test
+    public void newlyCreatedDefaultDirectoryIsOwnerOnly(@TempDir Path tempRoot) throws Exception {
+        ChildResult result = runChild("jdbc", tempRoot, null);
+        assertThat(result.exitCode)
+                .as("The first default-directory startup must succeed.\n%s", result.output)
+                .isZero();
+        assertThat(result.output).contains("JDBC_STARTUP_OK");
+
+        List<Path> directories = childDirectories(tempRoot);
+        assertThat(directories)
+                .as("The first startup should create one default directory below java.io.tmpdir")
+                .hasSize(1);
+        Path defaultDirectory = directories.get(0);
+        assertThat(
+                        PosixFilePermissions.toString(
+                                Files.getPosixFilePermissions(
+                                        defaultDirectory, LinkOption.NOFOLLOW_LINKS)))
+                .as(
+                        "A default directory created by the driver must be accessible only by its owner: %s",
+                        defaultDirectory)
+                .isEqualTo("rwx------");
+    }
+
+    @Test
+    public void groupWritableDefaultDirectoryIsRefused(@TempDir Path tempRoot) throws Exception {
+        assertSharedWritableDefaultDirectoryIsRefused(tempRoot, "rwxrwx---");
+    }
+
+    @Test
+    public void worldWritableDefaultDirectoryIsRefused(@TempDir Path tempRoot) throws Exception {
+        assertSharedWritableDefaultDirectoryIsRefused(tempRoot, "rwx---rwx");
+    }
+
+    private static void assertSharedWritableDefaultDirectoryIsRefused(
+            Path tempRoot, String sharedPermissions) throws Exception {
+        ChildResult firstStart = runChild("jdbc", tempRoot, null);
+        assertThat(firstStart.exitCode)
+                .as("The first default-directory startup must succeed.\n%s", firstStart.output)
+                .isZero();
+        assertThat(firstStart.output).contains("JDBC_STARTUP_OK");
+
+        List<Path> directories = childDirectories(tempRoot);
+        assertThat(directories)
+                .as("The first startup should create one default directory below java.io.tmpdir")
+                .hasSize(1);
+        Path defaultDirectory = directories.get(0);
+        clearDirectory(defaultDirectory);
+        byte[] sentinelBytes = new byte[] {83, 72, 65, 82, 69, 68};
+        Path staleNativeFile =
+                defaultDirectory.resolve(
+                        "sqlite-" + SQLiteJDBCLoader.getVersion() + "-shared-directory-stale.so");
+        Files.write(staleNativeFile, sentinelBytes);
+        Set<PosixFilePermission> permissions = PosixFilePermissions.fromString(sharedPermissions);
+        Files.setPosixFilePermissions(defaultDirectory, permissions);
+        UserPrincipal owner = Files.getOwner(defaultDirectory, LinkOption.NOFOLLOW_LINKS);
+        List<Path> entriesBefore = directoryEntries(defaultDirectory);
+
+        ChildResult secondStart = runChild("jdbc", tempRoot, null);
+
+        String refusal =
+                "Cannot use default native library directory '"
+                        + defaultDirectory
+                        + "': expected a directory owned by the current user that is not writable"
+                        + " by group or others, but found owner '"
+                        + owner.getName()
+                        + "' and permissions "
+                        + sharedPermissions
+                        + ".";
+        assertThat(secondStart.output)
+                .as("The child must report why the shared directory was refused.")
+                .contains(refusal);
+        assertExpectedDefaultPathOutcome(secondStart, refusal);
+        assertThat(directoryEntries(defaultDirectory))
+                .as(
+                        "SQLite startup must neither clean up nor extract into a %s directory. Child output:\n%s",
+                        sharedPermissions, secondStart.output)
+                .containsExactlyElementsOf(entriesBefore);
+        assertThat(Files.readAllBytes(staleNativeFile)).containsExactly(sentinelBytes);
+        assertThat(
+                        PosixFilePermissions.toString(
+                                Files.getPosixFilePermissions(
+                                        defaultDirectory, LinkOption.NOFOLLOW_LINKS)))
+                .as("SQLite startup must not change the permissions of a refused directory")
+                .isEqualTo(sharedPermissions);
     }
 
     @Test
