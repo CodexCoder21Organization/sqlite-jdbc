@@ -194,6 +194,19 @@ When packaging the resulting app, simply include the library in the distribution
 
 == Download
 
+This fork's `-codex-N` builds use the Maven repository at https://kotlin.directory.
+Add it to your Maven repository configuration when using the version shown below:
+
+[source,xml]
+----
+<repositories>
+    <repository>
+        <id>kotlin-directory</id>
+        <url>https://kotlin.directory</url>
+    </repository>
+</repositories>
+----
+
 Download from https://central.sonatype.com/artifact/org.xerial/sqlite-jdbc[Maven Central] or from the https://github.com/xerial/sqlite-jdbc/releases[releases] page.
 
 [source,xml,subs="attributes+"]
