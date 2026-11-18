@@ -118,18 +118,11 @@ public class OSInfoTest {
     }
 
     @Test
-    public void testIsAndroidTermux() throws Exception {
-        try {
-            ProcessRunner mockRunner = mock(ProcessRunner.class);
-            OSInfo.processRunner = mockRunner;
-            when(mockRunner.runAndWaitFor("uname -o")).thenReturn("Android");
-
-            assertThat(OSInfo.isAndroidTermux()).isTrue();
-            assertThat(OSInfo.isAndroidRuntime()).isFalse();
-            assertThat(OSInfo.isAndroid()).isTrue();
-        } finally {
-            OSInfo.processRunner = new ProcessRunner();
-        }
+    @SetSystemProperty(key = "java.vm.vendor", value = "Termux")
+    public void testIsAndroidTermux() {
+        assertThat(OSInfo.isAndroidTermux()).isTrue();
+        assertThat(OSInfo.isAndroidRuntime()).isFalse();
+        assertThat(OSInfo.isAndroid()).isTrue();
     }
 
     @Nested
