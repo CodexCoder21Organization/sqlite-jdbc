@@ -130,6 +130,10 @@ In the other OSs not listed above, the pure-java SQLite is used. (Applies to ver
 
 If you want to use the native library for your OS, link:./CONTRIBUTING.md[build the source from scratch].
 
+On Linux x86_64, `mvn test` also runs the fresh-JVM command-observer regression.
+It requires `/bin/sh` and `/usr/bin/uname`; other platforms keep the portable test suite.
+Like the class-loader tests, this JVM-specific test does not run inside a GraalVM native image.
+
 === JARs
 
 Since version `3.53.0.0` multiple JARs are published with different classifiers:

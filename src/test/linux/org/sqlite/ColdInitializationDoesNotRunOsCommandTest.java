@@ -98,7 +98,7 @@ public class ColdInitializationDoesNotRunOsCommandTest {
         } finally {
             for (Process child : children) {
                 if (child.isAlive()) child.destroyForcibly();
-                assertTrue(child.waitFor(5, TimeUnit.SECONDS), "Could not collect subprocess ");
+                assertTrue(child.waitFor(5, TimeUnit.SECONDS), "Could not collect the JDBC or observer subprocess after termination");
             }
         }
     }

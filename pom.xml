@@ -409,11 +409,14 @@
     </scm>
 
     <profiles>
-        <!-- The executable observer needs Linux uname and POSIX permissions. -->
+        <!-- The fresh-JVM observer targets Linux x86_64, where no ARM ABI probe is needed. -->
         <profile>
-            <id>linux-tests</id>
+            <id>linux-jvm-tests</id>
             <activation>
-                <os><name>Linux</name></os>
+                <os>
+                    <name>Linux</name>
+                    <arch>amd64</arch>
+                </os>
             </activation>
             <build>
                 <plugins>
@@ -551,6 +554,8 @@
                             <excludes>
                                 <!--  Cannot run in native mode, classes under test cannot be found, class path is empty  -->
                                 <exclude>**/MultipleClassLoaderTest.java</exclude>
+                                <!-- Also requires JVM class files and a fresh java subprocess. -->
+                                <exclude>**/ColdInitializationDoesNotRunOsCommandTest.java</exclude>
                             </excludes>
                         </configuration>
                     </plugin>
