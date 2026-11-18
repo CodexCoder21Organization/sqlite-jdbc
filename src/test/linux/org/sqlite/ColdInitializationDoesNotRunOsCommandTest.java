@@ -1,7 +1,6 @@
 package org.sqlite;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.assertj.core.api.Assertions.assertThat;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -44,17 +43,15 @@ public class ColdInitializationDoesNotRunOsCommandTest {
                             .redirectOutput(controlOutput.toFile())
                             .start();
             children.add(control);
-            assertTrue(
-                    control.waitFor(5, TimeUnit.SECONDS),
-                    "The uname observer control did not exit");
-            assertEquals(
-                    0,
-                    control.exitValue(),
-                    new String(Files.readAllBytes(controlOutput), StandardCharsets.UTF_8));
-            assertEquals(
-                    "uname -o\n",
-                    new String(Files.readAllBytes(calls), StandardCharsets.UTF_8),
-                    "The observer missed its real control call");
+            assertThat(control.waitFor(5, TimeUnit.SECONDS))
+                    .as("The uname observer control did not exit")
+                    .isTrue();
+            assertThat(control.exitValue())
+                    .as(new String(Files.readAllBytes(controlOutput), StandardCharsets.UTF_8))
+                    .isZero();
+            assertThat(new String(Files.readAllBytes(calls), StandardCharsets.UTF_8))
+                    .as("The observer missed its real control call")
+                    .isEqualTo("uname -o\n");
             Files.delete(calls);
 
             String classpath =
@@ -78,29 +75,29 @@ public class ColdInitializationDoesNotRunOsCommandTest {
             Process child =
                     builder.redirectErrorStream(true).redirectOutput(output.toFile()).start();
             children.add(child);
-            assertTrue(
-                    child.waitFor(20, TimeUnit.SECONDS),
-                    "The public JDBC connection did not finish in twenty seconds");
+            assertThat(child.waitFor(20, TimeUnit.SECONDS))
+                    .as("The public JDBC connection did not finish in twenty seconds")
+                    .isTrue();
             String text = new String(Files.readAllBytes(output), StandardCharsets.UTF_8);
-            assertEquals(0, child.exitValue(), text);
-            assertEquals("JDBC_STARTUP_OK\n", text);
+            assertThat(child.exitValue()).as(text).isZero();
+            assertThat(text).isEqualTo("JDBC_STARTUP_OK\n");
             String received =
                     Files.exists(calls)
                             ? new String(Files.readAllBytes(calls), StandardCharsets.UTF_8)
                             : "";
             System.out.println("JDBC_OS_COMMAND_BOUNDARY_CALLS " + received.replace("\n", "\\n"));
-            assertEquals(
-                    "",
-                    received,
-                    "Cold JDBC initialization must not launch an external OS-detection command; "
-                            + "the real uname executable received: "
-                            + received.replace("\n", "\\n"));
+            assertThat(received)
+                    .as(
+                            "Cold JDBC initialization must not launch an external OS-detection"
+                                + " command; the real uname executable received: "
+                                    + received.replace("\n", "\\n"))
+                    .isEmpty();
         } finally {
             for (Process child : children) {
                 if (child.isAlive()) child.destroyForcibly();
-                assertTrue(
-                        child.waitFor(5, TimeUnit.SECONDS),
-                        "Could not collect the JDBC or observer subprocess after termination");
+                assertThat(child.waitFor(5, TimeUnit.SECONDS))
+                        .as("Could not collect the JDBC or observer subprocess after termination")
+                        .isTrue();
             }
         }
     }
