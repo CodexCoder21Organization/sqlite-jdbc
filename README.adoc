@@ -1,5 +1,5 @@
 = SQLite JDBC Driver
-:project-version: 3.53.4.0
+:project-version: 3.53.4.1-codex-2
 
 image:https://img.shields.io/github/actions/workflow/status/xerial/sqlite-jdbc/ci.yml?branch=master[GitHub Workflow Status (branch),link=https://github.com/xerial/sqlite-jdbc/actions/workflows/ci.yml?query=branch%3Amaster]
 image:https://badges.gitter.im/xerial/sqlite-jdbc.svg[Join the chat,link=https://gitter.im/xerial/sqlite-jdbc?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge]
@@ -121,6 +121,10 @@ the following operating systems:
 |FreeBSD |✔ |✔ | | | |✔ | |
 |link:USAGE.md[Android (API Level 24+)] |✔ |✔ |✔ | | |✔ | |
 |===
+
+Termux OpenJDK selects the Android native library from its `java.vendor` or
+`java.vm.vendor` value (`Termux`), without running an external OS-detection command.
+Android Runtime and Android system-library detection are also supported.
 
 In the other OSs not listed above, the pure-java SQLite is used. (Applies to versions before 3.7.15)
 

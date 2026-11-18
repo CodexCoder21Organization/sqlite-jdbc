@@ -137,11 +137,10 @@ public class OSInfo {
     }
 
     public static boolean isAndroidTermux() {
-        try {
-            return processRunner.runAndWaitFor("uname -o").toLowerCase().contains("android");
-        } catch (Exception ignored) {
-            return false;
-        }
+        // Termux OpenJDK is built with --with-vendor-name="Termux". Read the JVM identity
+        // directly so native library selection never needs to start an external uname process.
+        return "Termux".equalsIgnoreCase(System.getProperty("java.vendor", ""))
+                || "Termux".equalsIgnoreCase(System.getProperty("java.vm.vendor", ""));
     }
 
     @AndroidSignatureIgnore(explanation = "Should not reach this code path")
