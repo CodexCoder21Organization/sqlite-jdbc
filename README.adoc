@@ -1,5 +1,5 @@
 = SQLite JDBC Driver
-:project-version: 3.53.4.0
+:project-version: 3.53.4.1-codex-2
 
 image:https://img.shields.io/github/actions/workflow/status/xerial/sqlite-jdbc/ci.yml?branch=master[GitHub Workflow Status (branch),link=https://github.com/xerial/sqlite-jdbc/actions/workflows/ci.yml?query=branch%3Amaster]
 image:https://badges.gitter.im/xerial/sqlite-jdbc.svg[Join the chat,link=https://gitter.im/xerial/sqlite-jdbc?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge]
@@ -122,9 +122,17 @@ the following operating systems:
 |link:USAGE.md[Android (API Level 24+)] |✔ |✔ |✔ | | |✔ | |
 |===
 
+Termux OpenJDK selects the Android native library from its `java.vendor` or
+`java.vm.vendor` value (`Termux`), without running an external OS-detection command.
+Android Runtime and Android system-library detection are also supported.
+
 In the other OSs not listed above, the pure-java SQLite is used. (Applies to versions before 3.7.15)
 
 If you want to use the native library for your OS, link:./CONTRIBUTING.md[build the source from scratch].
+
+On Linux x86_64, `mvn test` also runs the fresh-JVM command-observer regression.
+It requires `/bin/sh` and `/usr/bin/uname`; other platforms keep the portable test suite.
+Like the class-loader tests, this JVM-specific test does not run inside a GraalVM native image.
 
 === JARs
 
@@ -185,6 +193,19 @@ This will automatically place the `sqlitejdbc` library in the `/target` folder o
 When packaging the resulting app, simply include the library in the distribution bundle.
 
 == Download
+
+This fork's `-codex-N` builds use the Maven repository at https://kotlin.directory.
+Add it to your Maven repository configuration when using the version shown below:
+
+[source,xml]
+----
+<repositories>
+    <repository>
+        <id>kotlin-directory</id>
+        <url>https://kotlin.directory</url>
+    </repository>
+</repositories>
+----
 
 Download from https://central.sonatype.com/artifact/org.xerial/sqlite-jdbc[Maven Central] or from the https://github.com/xerial/sqlite-jdbc/releases[releases] page.
 

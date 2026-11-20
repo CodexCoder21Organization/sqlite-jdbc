@@ -4,7 +4,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>org.xerial</groupId>
     <artifactId>sqlite-jdbc</artifactId>
-    <version>3.53.4.1-SNAPSHOT</version>
+    <version>3.53.4.1-codex-2</version>
     <name>SQLite JDBC</name>
     <description>SQLite JDBC library</description>
     <url>https://github.com/xerial/sqlite-jdbc</url>
@@ -409,6 +409,35 @@
     </scm>
 
     <profiles>
+        <!-- The fresh-JVM observer targets Linux x86_64, where no ARM ABI probe is needed. -->
+        <profile>
+            <id>linux-jvm-tests</id>
+            <activation>
+                <os>
+                    <name>Linux</name>
+                    <arch>amd64</arch>
+                </os>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>build-helper-maven-plugin</artifactId>
+                        <version>3.6.1</version>
+                        <executions>
+                            <execution>
+                                <id>linux-test-source</id>
+                                <phase>generate-test-sources</phase>
+                                <goals><goal>add-test-source</goal></goals>
+                                <configuration>
+                                    <sources><source>src/test/linux</source></sources>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
         <profile>
             <id>release</id>
             <activation>
@@ -525,6 +554,8 @@
                             <excludes>
                                 <!--  Cannot run in native mode, classes under test cannot be found, class path is empty  -->
                                 <exclude>**/MultipleClassLoaderTest.java</exclude>
+                                <!-- Also requires JVM class files and a fresh java subprocess. -->
+                                <exclude>**/ColdInitializationDoesNotRunOsCommandTest.java</exclude>
                             </excludes>
                         </configuration>
                     </plugin>
